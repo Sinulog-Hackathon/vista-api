@@ -1,7 +1,7 @@
 """Service layer for VirtualStaging entity"""
 from typing import Optional, List
 from datetime import datetime
-from models.virtual_staging import VirtualStaging, StagingParameters, StagingStatus
+from models.virtual_staging import VirtualStaging, StagingParameters
 from repositories.virtual_staging_repository import VirtualStagingRepository
 
 

@@ -50,7 +50,6 @@ class VirtualStaging(BaseModel):
         if self.completed_at:
             data['completed_at'] = self.completed_at.isoformat()
         data['staging_parameters'] = self.staging_parameters.model_dump()
-        data['status'] = self.status.value
         return data
 
     @classmethod
