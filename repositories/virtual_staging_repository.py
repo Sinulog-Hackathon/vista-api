@@ -1,6 +1,6 @@
 """Repository for VirtualStaging model"""
 from typing import Dict, Any, List, Optional
-from models.virtual_staging import VirtualStaging, StagingStatus
+from models.virtual_staging import VirtualStaging
 from repositories.base_repository import BaseRepository
 
 
