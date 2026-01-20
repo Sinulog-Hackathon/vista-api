@@ -26,8 +26,6 @@ class VirtualStagingChatMessage(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow, description="When the message was created")
     
-    # Metadata
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about the message")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for Firestore"""
@@ -68,8 +66,7 @@ class VirtualStagingChatHistory(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="When the chat history was last updated")
     last_message_at: Optional[datetime] = Field(default=None, description="Timestamp of the last message")
     
-    # Metadata
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about the chat history")
+
 
     def add_message(self, message: VirtualStagingChatMessage) -> None:
         """Add a message to the chat history"""
