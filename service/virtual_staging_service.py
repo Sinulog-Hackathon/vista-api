@@ -65,6 +65,23 @@ class VirtualStagingService:
             
             print(f"[SESSION] Using original image from: {original_image_path}")
             
+            # Upload original image to AWS S3
+            with open(original_image_path, 'rb') as f:
+                image_bytes = f.read()
+            
+            upload_result = self.aws_service.upload_bytes(
+                image_bytes=image_bytes,
+                filename=f"original_{session_id}.png",
+                folder=f"staging/{session_id}/original",
+                content_type="image/png"
+            )
+            
+            if not upload_result.get("success"):
+                print(f"Failed to upload original image to AWS: {upload_result.get('error')}")
+                return None
+            
+            print(f"[SESSION] Uploaded original image to AWS: {upload_result.get('url')}")
+            
             # Create chat history for this session
             chat_history_id = f"chat_{session_id}"
             chat_history = self.chat_history_service.create_chat_history(
@@ -80,28 +97,28 @@ class VirtualStagingService:
             
             print(f"[SESSION] Chat history created: {chat_history_id}")
             
-            # Create session in database with local path and chat history reference
+            # Create session in database with S3 URLs and local path reference
             staging = VirtualStaging(
                 session_id=session_id,
                 property_id=property_id,
                 user_id=user_id,
                 room_name=room_name,
                 chat_history_id=chat_history_id,
-                original_image_path=original_image_path,
-                orignal_image_key=None,
-                original_image_url=None,
+                original_image_path=original_image_path,  # Keep local path for processing
+                orignal_image_key=upload_result.get("key"),  # S3 key
+                original_image_url=upload_result.get("url"),  # S3 URL
                 current_parameters=staging_parameters,
                 version=0,
                 last_saved_version=0
             )
             
-            print(f"[SESSION] VirtualStaging created with path: {staging.original_image_path}")
+            print(f"[SESSION] VirtualStaging created with S3 URL: {staging.original_image_url}")
             
             created_session = self.repository.create_session(staging)
             
             if created_session:
-                print(f"[SESSION] Session {session_id} created with chat history")
-                print(f"[SESSION] Stored path in database: {created_session.original_image_path}")
+                print(f"[SESSION] Session {session_id} created with chat history and S3 upload")
+                print(f"[SESSION] S3 key: {created_session.orignal_image_key}")
             
             return created_session
         
@@ -114,11 +131,11 @@ class VirtualStagingService:
                         staging_parameters: Optional[StagingParameters] = None,
                         custom_prompt: Optional[str] = None,
                         mask_image_url: Optional[str] = None,
-                        user_message: Optional[str] = None) -> Optional[VirtualStagingResponse]:
+                        user_message: Optional[str] = None,
+                        image_path_override: Optional[str] = None) -> Optional[VirtualStagingResponse]:
         """
-        Generate virtual staging with Gemini and save as unsaved working version.
-        This does NOT save to history until save_change() is called.
-        Also adds the initial message to chat history.
+        Generate virtual staging with Gemini.
+        Uses the provided image_path_override or falls back to session's current/original image.
         
         Args:
             session_id: Session ID
@@ -126,6 +143,7 @@ class VirtualStagingService:
             custom_prompt: Custom prompt for Gemini (optional)
             mask_image_url: Optional mask image URL for specific area editing
             user_message: Optional user message for chat history
+            image_path_override: Optional image path to use instead of session's stored image
         
         Returns:
             VirtualStagingResponse with unsaved working image, or None if failed
@@ -136,8 +154,9 @@ class VirtualStagingService:
                 print(f"Session {session_id} not found")
                 return None
             
-            # Ensure we have an image path (with fallback reconstruction)
-            image_path = session.original_image_path
+            # Determine which image to use: override, current, or original
+            image_path = image_path_override or session.current_image_path or session.original_image_path
+            
             if not image_path or not os.path.exists(image_path):
                 # Try to reconstruct path from session_id
                 reconstructed_path = str(Path('uploads') / f"original_{session_id}.png")
@@ -146,26 +165,44 @@ class VirtualStagingService:
                     print(f"[STAGING] Using reconstructed path: {reconstructed_path}")
                 else:
                     print(f"Error: Original image not found for session {session_id}")
-                    print(f"  Expected path: {session.original_image_path}")
+                    print(f"  Expected path: {image_path}")
                     print(f"  Reconstructed: {reconstructed_path}")
                     return None
             
             # Use provided parameters or fall back to session parameters
             params = staging_parameters or session.current_parameters
             
-            # Build prompt
+            # Build prompt - enhance if mask is provided
             if custom_prompt:
                 prompt = custom_prompt
+                # If mask is provided, enhance the custom prompt with mask-specific context
+                if mask_image_url:
+                    prompt = f"{prompt}\n\nMASK IMAGE INSTRUCTION:\nThe mask image shows a specific region of interest overlaid on the original room image. Use ONLY the mask to identify WHERE to apply changes - disregard the mask image's visual content itself. Apply your staging modifications ONLY to the region indicated by the mask while maintaining the ORIGINAL IMAGE FORMAT. The output must preserve the room layout, camera angle, and architecture of the original image."
             elif params:
-                prompt = build_staging_prompt(
+                base_prompt = build_staging_prompt(
                     role=params.role,
                     style=params.style,
                     furniture_theme=params.furniture_style or "modern",
                     color_scheme=params.color_scheme,
                     specific_request=params.specific_requests
                 )
+                
+                # Add instruction to maintain original room format and structure
+                format_preservation = "\n\nIMPORTANT FORMAT PRESERVATION:\nMaintain the exact layout, camera angle, and room structure of the original image. Only modify the staging elements (furniture, decor, colors) while keeping the architectural elements, walls, windows, doors, and spatial arrangement identical. The staging should feel like furniture and decor adjustments to the SAME room."
+                base_prompt = f"{base_prompt}{format_preservation}"
+                
+                # If mask is provided, add specific instructions about the masked region
+                if mask_image_url:
+                    prompt = f"{base_prompt}\n\nMASK IMAGE INSTRUCTION:\nThe mask image shows a specific region of interest overlaid on the original room image. Use ONLY the mask to identify WHERE to apply changes - disregard the mask image's visual content itself. Focus your design modifications ONLY on the area indicated by the mask. The masked area should receive the full attention of the styling changes. The output must maintain the ORIGINAL IMAGE FORMAT - preserve the room layout, camera angle, and architecture exactly as shown in the first image."
+                else:
+                    prompt = base_prompt
             else:
                 return None
+            
+            # Print the full prompt for debugging
+            print(f"\n[STAGING] ========== FULL PROMPT FOR SESSION {session_id} ==========")
+            print(f"{prompt}")
+            print(f"[STAGING] ========== END PROMPT ==========\n")
             
             # Generate image using Gemini with local file path
             generated_image_bytes = self.gemini_service.generate_image_from_image(
@@ -258,7 +295,7 @@ class VirtualStagingService:
                 image_url=image_data_url,
                 metadata=metadata,
                 prompt_used=prompt,
-                is_saved=False,
+                furniture_list=None,
                 can_revert=len(session.saved_versions) > 0
             )
         
@@ -478,7 +515,7 @@ class VirtualStagingService:
     
     def get_session_response(self, session_id: str) -> Optional[StagingSessionResponse]:
         """
-        Get staging session as API response with all metadata
+        Get staging session as API response with all metadata including all furniture lists
         """
         try:
             session = self.get_session(session_id)
@@ -492,7 +529,7 @@ class VirtualStagingService:
             
             params_dict = session.current_parameters.model_dump() if session.current_parameters else {}
             
-            return StagingSessionResponse(
+            response = StagingSessionResponse(
                 session_id=session.session_id,
                 property_id=session.property_id,
                 user_id=session.user_id,
@@ -510,6 +547,8 @@ class VirtualStagingService:
                 completed_at=session.completed_at,
                 error_message=session.error_message
             )
+            
+            return response
         
         except Exception as e:
             print(f"Error getting session response: {str(e)}")
@@ -518,7 +557,8 @@ class VirtualStagingService:
     def refine_staging(self,
                       session_id: str,
                       new_staging_parameters: StagingParameters,
-                      user_message: Optional[str] = None) -> Optional[RefinementResponse]:
+                      user_message: Optional[str] = None,
+                      mask_image_url: Optional[str] = None) -> Optional[RefinementResponse]:
         """
         Refine existing staging with new parameters.
         Creates a new unsaved working version and persists to chat history.
@@ -527,6 +567,7 @@ class VirtualStagingService:
             session_id: Session ID to refine
             new_staging_parameters: Updated staging parameters
             user_message: Optional user message for chat history
+            mask_image_url: Optional mask image URL for specific area editing
         
         Returns:
             RefinementResponse with new unsaved working image, or None if failed
@@ -536,8 +577,8 @@ class VirtualStagingService:
             if not session:
                 return None
             
-            # Ensure we have an image path (with fallback reconstruction)
-            image_path = session.original_image_path
+            # Use current image (what's on screen) for refinement
+            image_path = session.current_image_path or session.original_image_path
             if not image_path or not os.path.exists(image_path):
                 # Try to reconstruct path from session_id
                 reconstructed_path = str(Path('uploads') / f"original_{session_id}.png")
@@ -573,14 +614,28 @@ class VirtualStagingService:
                 specific_request=new_staging_parameters.specific_requests
             )
             
+            # Add instruction to maintain original room format and structure
+            format_preservation = "\n\nIMPORTANT FORMAT PRESERVATION:\nMaintain the exact layout, camera angle, and room structure of the original image. Only modify the staging elements (furniture, decor, colors) while keeping the architectural elements, walls, windows, doors, and spatial arrangement identical to the original room format. The refinement should feel like staging adjustments to the SAME room, not a different room or angle."
+            refinement_prompt = f"{refinement_prompt}{format_preservation}"
+            
+            # Enhance prompt if mask is provided
+            if mask_image_url:
+                refinement_prompt = f"{refinement_prompt}\n\nMASK IMAGE INSTRUCTION:\nThe mask image shows a specific region of interest overlaid on the original room image. Use ONLY the mask to identify WHERE to apply changes - disregard the mask image's visual content itself. Focus your refinement modifications ONLY on the area indicated by the mask. The masked area should receive the full attention of the styling changes. The refinement must maintain the ORIGINAL IMAGE FORMAT - preserve the room layout, camera angle, and architecture exactly as shown in the original image, changing only the staging elements in the masked region."
+            
             # Add context
             full_refinement_prompt = f"{refinement_context}\n\n{refinement_prompt}"
             
-            # Generate refined image
+            # Print the full prompt for debugging
+            print(f"\n[REFINE] ========== FULL PROMPT FOR SESSION {session_id} ==========")
+            print(f"{full_refinement_prompt}")
+            print(f"[REFINE] ========== END PROMPT ==========\n")
+            
+            # Generate refined image with optional mask
             refined_image_bytes = self.gemini_service.generate_image_from_image(
                 model=self.gemini_model,
                 image_path=image_path,
-                prompt=full_refinement_prompt
+                prompt=full_refinement_prompt,
+                mask_image_path=mask_image_url
             )
             
             if not refined_image_bytes:
@@ -652,10 +707,8 @@ class VirtualStagingService:
             
             return RefinementResponse(
                 image_url=image_data_url,
-                version=session.version,
                 updated_at=session.updated_at,
-                prompt_used=full_refinement_prompt,
-                is_saved=False
+                prompt_used=full_refinement_prompt
             )
         
         except Exception as e:
@@ -699,4 +752,6 @@ class VirtualStagingService:
             user_id > 0 and
             room_name and room_name.strip()
         )
+
+
 
