@@ -1,7 +1,7 @@
 """Base repository with common Firestore operations"""
 from typing import TypeVar, Generic, Dict, Any, List, Optional
 from abc import ABC, abstractmethod
-from firebase_admin import firestore
+from config.firebase_config import db;
 
 
 T = TypeVar('T')
@@ -17,7 +17,8 @@ class BaseRepository(ABC, Generic[T]):
         Args:
             collection_name: Name of Firestore collection
         """
-        self.db = firestore.client(database_id='vista-db')
+        
+        self.db = db
         self.collection_name = collection_name
         self.collection = self.db.collection(collection_name)
     
