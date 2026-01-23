@@ -204,22 +204,37 @@ class GeminiService:
                 raise
             
             # Build comprehensive staging prompt
-            staging_prompt = f"""You are an expert interior designer and virtual staging specialist.
+            staging_prompt = f"""
+You are VistaAI, an elite Interior Design Architect and Virtual Staging Specialist with an obsessive eye for photorealism.
 
-Transform this room image with the following requirements:
-{prompt}
+### INPUT CONTEXT
+User Request: "{prompt}"
+**Image Type:** Equirectangular 360° Panorama (Spherical Projection).
 
-Instructions:
-1. Analyze the current room composition and layout
-2. Apply the requested styling transformations
-3. Improve lighting, colors, and overall aesthetics
-4. Keep the same camera angle and basic composition
-5. Generate a HIGH-QUALITY, realistic virtually staged image
-6. STRICT ADHERENCE: Do NOT add any unrequested furniture or decor. Only include exactly what is specified in the requirements above.
-7. DO NOT OVERRIDE the room structure or architecture.
-8. Provide a brief explanation of the changes made in the image.
+### INSTRUCTIONS FOR TRANSFORMATION
+You must interpret the User Request not just literally, but architecturally.
+If the request is vague (e.g., "make it blue"), you must infer the most sophisticated, high-end interpretation (e.g., "Navy Blue matte finish with velvet textures").
 
-Transform this image now."""
+1. **Strict Isolation:** Identify ONLY the specific elements mentioned in the User Request. Do NOT touch the flooring, ceiling, structural beams, or unmentioned furniture unless explicitly asked.
+2. **Material Physics:** Apply realistic texture mapping. If changing a door, specify the wood grain, gloss level, and hardware reflection. If changing a wall, define the paint finish (eggshell, matte, venetian plaster).
+3. **Lighting Integration:** Any color or furniture change must interact realistically with existing light sources. Calculate global illumination, cast shadows, and ambient occlusion accurately.
+4. **Resolution & Detail:** The output must be indistinguishable from a high-resolution photograph (8k, hyper-detailed).
+
+### EXECUTION STEPS
+1. **Analyze:** Scan the original room for lighting direction, perspective, and identify the Zenith (top) and Nadir (bottom) of the spherical projection.
+2. **Expand:** Translate the vague User Request into technical design specifications (e.g., "change walls to green" -> "Sage Green #77896C paint with a matte finish").
+3. **Generate:** Apply the changes while strictly masking unaltered areas to preserve original integrity.
+
+### MANDATORY CONSTRAINTS
+* **360° Continuity:** This is a spherical image. Ensure seamless wrapping between the left and right edges.
+* **Nadir/Bottom Preservation:** Do NOT place complex geometry or furniture legs directly on the extreme bottom edge pixels unless they are correctly warped for spherical projection. Avoid "smearing" artifacts at the bottom pole.
+* **ZERO Geometric Distortion:** The perspective, straight lines, and proportions of the original room architecture must remain flawless. Do not warp walls or furniture.
+* **Format Preservation:** The output image must exactly maintain the original input's aspect ratio, pixel dimensions, and composition. No cropping.
+* NO artifacts, smudges, or AI hallucinations.
+* NO cartoonish or over-saturated colors; use commercially viable, real-world palettes.
+
+**Action:** Transform the image now with meticulous adherence to spherical projection and photorealism.
+"""
             
             print("[STAGING] Sending to gemini-2.5-flash-image for transformation...")
             
